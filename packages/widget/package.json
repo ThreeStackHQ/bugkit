@@ -1,14 +1,22 @@
 {
   "name": "@bugkit/widget",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "description": "BugKit reporter widget — embed in any SaaS app",
   "main": "./src/index.ts",
+  "type": "module",
   "scripts": {
-    "build": "tsc --noEmit"
+    "build": "rollup -c rollup.config.mjs",
+    "type-check": "tsc --noEmit"
   },
   "devDependencies": {
     "@bugkit/config": "workspace:*",
+    "@rollup/plugin-commonjs": "^26.0.0",
+    "@rollup/plugin-node-resolve": "^15.0.0",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^11.0.0",
+    "rollup": "^4.0.0",
+    "tslib": "^2.8.1",
     "typescript": "^5.4.5"
   }
 }

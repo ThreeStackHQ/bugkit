@@ -24,5 +24,8 @@ export {
   subscriptionsRelations,
 } from "./schema";
 
+// Types
+export type { ConsoleLogEntry } from "./schema";
+
 // Drizzle helpers re-exported
 export { eq, and, or, desc, asc, sql, inArray, isNull, isNotNull } from "drizzle-orm";

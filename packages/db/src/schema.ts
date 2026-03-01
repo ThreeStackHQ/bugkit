@@ -9,6 +9,14 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
+// ─── Shared Types ─────────────────────────────────────────────────────────────
+
+export interface ConsoleLogEntry {
+  level: "log" | "warn" | "error" | "info" | "debug";
+  message: string;
+  timestamp: number;
+}
+
 // ─── Enums ────────────────────────────────────────────────────────────────────
 
 export const reportStatusEnum = pgEnum("report_status", [
@@ -61,12 +69,14 @@ export const reports = pgTable("reports", {
   projectId: uuid("project_id")
     .notNull()
     .references(() => projects.id, { onDelete: "cascade" }),
-  title: text("title").notNull(),
+  title: text("title"),
   description: text("description"),
   screenshotUrl: text("screenshot_url"),
-  consoleLogs: jsonb("console_logs").$type<unknown[]>().default([]),
+  annotatedScreenshotUrl: text("annotated_screenshot_url"),
+  consoleLogs: jsonb("console_logs").$type<ConsoleLogEntry[]>().default([]),
   userAgent: text("user_agent"),
   url: text("url"),
+  userId: text("user_id"),
   status: reportStatusEnum("status").notNull().default("open"),
   notes: text("notes"),
   metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
