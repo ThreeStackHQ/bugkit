@@ -4,10 +4,12 @@
     "target": "ES2017",
     "lib": ["dom", "es2017"],
     "module": "esnext",
-    "moduleResolution": "bundler",
+    "moduleResolution": "node",
     "outDir": "dist",
     "rootDir": "src",
-    "noEmit": true
+    "noEmit": false,
+    "declaration": false,
+    "declarationMap": false
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist"]
