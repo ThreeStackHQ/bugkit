@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { randomUUID } from "crypto";
-import { db, reports } from "@bugkit/db";
+import { db, reports, integrations, eq, and } from "@bugkit/db";
 import type { ConsoleLogEntry } from "@bugkit/db";
 import { uploadToR2 } from "@/lib/r2";
 import { validateProjectAccess } from "@/lib/api-auth";
+import { Octokit } from "@octokit/rest";
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
@@ -23,7 +24,194 @@ const ReportBodySchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional().default({}),
   user_id: z.string().optional(),
   title: z.string().optional(),
+  description: z.string().optional(),
 });
+
+// ─── Integration Types ────────────────────────────────────────────────────────
+
+interface SlackConfig {
+  webhookUrl?: string;
+  channel?: string;
+}
+
+interface LinearConfig {
+  apiKey?: string;
+  teamId?: string;
+}
+
+interface GitHubConfig {
+  token?: string;
+  repo?: string;
+}
+
+// ─── Integration Notifiers ────────────────────────────────────────────────────
+
+async function notifySlack(
+  config: SlackConfig,
+  report: {
+    title: string | null;
+    url: string | null;
+    description: string | null;
+  }
+): Promise<void> {
+  if (!config.webhookUrl) return;
+
+  const payload = {
+    text: "New bug report",
+    attachments: [
+      {
+        color: "danger",
+        title: report.title ?? "Untitled",
+        text: report.description ?? undefined,
+        fields: [
+          { title: "Severity", value: "medium", short: true },
+          { title: "URL", value: report.url ?? "N/A", short: true },
+        ],
+      },
+    ],
+  };
+
+  await fetch(config.webhookUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+async function notifyLinear(
+  config: LinearConfig,
+  report: {
+    title: string | null;
+    description: string | null;
+    url: string | null;
+    consoleLogs: ConsoleLogEntry[];
+  }
+): Promise<void> {
+  if (!config.apiKey || !config.teamId) return;
+
+  const descriptionMd = [
+    report.description ?? "",
+    "",
+    `**Page URL:** ${report.url ?? "N/A"}`,
+    "",
+    report.consoleLogs.length > 0
+      ? `**Console Logs:**\n\`\`\`\n${report.consoleLogs
+          .map((l) => `[${l.level}] ${l.message}`)
+          .join("\n")}\n\`\`\``
+      : "",
+  ]
+    .join("\n")
+    .trim();
+
+  const mutation = `
+    mutation IssueCreate($input: IssueCreateInput!) {
+      issueCreate(input: $input) {
+        success
+      }
+    }
+  `;
+
+  const variables = {
+    input: {
+      title: `Bug: ${report.title ?? "Untitled"}`,
+      description: descriptionMd,
+      teamId: config.teamId,
+    },
+  };
+
+  await fetch("https://api.linear.app/graphql", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: config.apiKey,
+    },
+    body: JSON.stringify({ query: mutation, variables }),
+  });
+}
+
+async function notifyGitHub(
+  config: GitHubConfig,
+  report: {
+    title: string | null;
+    description: string | null;
+    url: string | null;
+    screenshotUrl: string | null;
+    consoleLogs: ConsoleLogEntry[];
+  }
+): Promise<void> {
+  if (!config.token || !config.repo) return;
+
+  const [owner, repo] = config.repo.split("/");
+  if (!owner || !repo) return;
+
+  const body = [
+    report.description ?? "",
+    "",
+    `**Page URL:** ${report.url ?? "N/A"}`,
+    "",
+    report.screenshotUrl
+      ? `**Screenshot:** ![screenshot](${report.screenshotUrl})`
+      : "",
+    "",
+    report.consoleLogs.length > 0
+      ? `**Console Logs:**\n\`\`\`\n${report.consoleLogs
+          .map((l) => `[${l.level}] ${l.message}`)
+          .join("\n")}\n\`\`\``
+      : "",
+  ]
+    .join("\n")
+    .trim();
+
+  const octokit = new Octokit({ auth: config.token });
+
+  await octokit.issues.create({
+    owner,
+    repo,
+    title: report.title ?? "Untitled bug report",
+    body,
+    labels: ["bug"],
+  });
+}
+
+async function fireIntegrationNotifications(
+  projectId: string,
+  report: {
+    title: string | null;
+    description: string | null;
+    url: string | null;
+    screenshotUrl: string | null;
+    consoleLogs: ConsoleLogEntry[];
+  }
+): Promise<void> {
+  try {
+    const projectIntegrations = await db
+      .select({ type: integrations.type, config: integrations.config })
+      .from(integrations)
+      .where(
+        and(
+          eq(integrations.projectId, projectId),
+          eq(integrations.isActive, true)
+        )
+      );
+
+    for (const integration of projectIntegrations) {
+      const cfg = (integration.config ?? {}) as Record<string, unknown>;
+
+      if (integration.type === "slack") {
+        notifySlack(cfg as SlackConfig, report).catch(() => {});
+      } else if (integration.type === "linear") {
+        notifyLinear(cfg as LinearConfig, {
+          ...report,
+          consoleLogs: report.consoleLogs,
+        }).catch(() => {});
+      } else if (integration.type === "github") {
+        notifyGitHub(cfg as GitHubConfig, report).catch(() => {});
+      }
+    }
+  } catch {
+    // Fire-and-forget: never fail the main request
+  }
+}
 
 // ─── POST /api/reports ────────────────────────────────────────────────────────
 
@@ -87,6 +275,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       .values({
         projectId: data.project_id,
         title: data.title ?? null,
+        description: data.description ?? null,
         url: data.url,
         userAgent: data.user_agent,
         screenshotUrl,
@@ -95,7 +284,23 @@ export async function POST(req: NextRequest): Promise<Response> {
         userId: data.user_id ?? null,
         status: "open",
       })
-      .returning({ id: reports.id, screenshotUrl: reports.screenshotUrl });
+      .returning({
+        id: reports.id,
+        screenshotUrl: reports.screenshotUrl,
+        title: reports.title,
+        description: reports.description,
+        url: reports.url,
+        consoleLogs: reports.consoleLogs,
+      });
+
+    // ── Fire integration notifications (non-blocking) ────────────────────
+    void fireIntegrationNotifications(data.project_id, {
+      title: report.title,
+      description: report.description,
+      url: report.url,
+      screenshotUrl: report.screenshotUrl,
+      consoleLogs: (report.consoleLogs ?? []) as ConsoleLogEntry[],
+    });
 
     return NextResponse.json(
       { reportId: report.id, screenshotUrl: report.screenshotUrl },
