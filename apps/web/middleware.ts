@@ -5,8 +5,10 @@ import type { NextRequest } from "next/server";
 export default auth((req: NextRequest & { auth: unknown }) => {
   const { pathname } = req.nextUrl;
 
-  // Protect all dashboard routes
-  if (pathname.startsWith("/dashboard")) {
+  const protectedPrefixes = ["/reports", "/projects", "/settings", "/billing"];
+  const isProtected = protectedPrefixes.some((p) => pathname.startsWith(p));
+
+  if (isProtected) {
     const session = (req as { auth: unknown }).auth;
     if (!session) {
       const loginUrl = new URL("/login", req.url);
@@ -19,5 +21,5 @@ export default auth((req: NextRequest & { auth: unknown }) => {
 });
 
 export const config = {
-  matcher: ["/dashboard/:path*"],
+  matcher: ["/reports/:path*", "/projects/:path*", "/settings/:path*", "/billing/:path*"],
 };

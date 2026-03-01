@@ -1,11 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { randomUUID } from "crypto";
-import { db, reports, integrations, eq, and } from "@bugkit/db";
+import { db, reports, projects, integrations, eq, and, desc, inArray, sql } from "@bugkit/db";
 import type { ConsoleLogEntry } from "@bugkit/db";
 import { uploadToR2 } from "@/lib/r2";
 import { validateProjectAccess } from "@/lib/api-auth";
+import { auth as getSession } from "@/auth";
 import { Octokit } from "@octokit/rest";
+
+// ─── CORS ─────────────────────────────────────────────────────────────────────
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+export async function OPTIONS(): Promise<Response> {
+  return NextResponse.json({}, { headers: corsHeaders });
+}
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
@@ -245,15 +258,15 @@ export async function POST(req: NextRequest): Promise<Response> {
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Validation failed", issues: parsed.error.issues },
-        { status: 422 }
+        { status: 422, headers: corsHeaders }
       );
     }
 
     const data = parsed.data;
 
     // ── Auth ─────────────────────────────────────────────────────────────
-    const auth = await validateProjectAccess(req, data.project_id);
-    if (auth instanceof Response) return auth;
+    const projectAccess = await validateProjectAccess(req, data.project_id);
+    if (projectAccess instanceof Response) return projectAccess;
 
     // ── Upload screenshot to R2 ──────────────────────────────────────────
     // Strip data-URL prefix if present
@@ -304,10 +317,91 @@ export async function POST(req: NextRequest): Promise<Response> {
 
     return NextResponse.json(
       { reportId: report.id, screenshotUrl: report.screenshotUrl },
-      { status: 201 }
+      { status: 201, headers: corsHeaders }
     );
   } catch (err) {
     console.error("[POST /api/reports]", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: "Internal server error" }, { status: 500, headers: corsHeaders });
+  }
+}
+
+// ─── GET /api/reports ─────────────────────────────────────────────────────────
+
+export async function GET(req: NextRequest): Promise<Response> {
+  try {
+    const session = await getSession();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders });
+    }
+
+    const url = new URL(req.url);
+    const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1", 10));
+    const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get("limit") ?? "20", 10)));
+    const offset = (page - 1) * limit;
+    const projectId = url.searchParams.get("project_id");
+    const status = url.searchParams.get("status");
+
+    // Get all project IDs belonging to the user
+    const userProjects = await db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(eq(projects.userId, session.user.id));
+
+    if (userProjects.length === 0) {
+      return NextResponse.json({ reports: [], total: 0, page, limit }, { headers: corsHeaders });
+    }
+
+    const projectIds = userProjects.map((p) => p.id);
+
+    // Build where conditions dynamically
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const conditions: any[] = [inArray(reports.projectId, projectIds)];
+
+    if (projectId) {
+      conditions.push(eq(reports.projectId, projectId));
+    }
+
+    if (status && ["open", "in_progress", "resolved", "closed"].includes(status)) {
+      conditions.push(eq(reports.status, status as "open" | "in_progress" | "resolved" | "closed"));
+    }
+
+    const whereClause = and(...conditions);
+
+    const [rows, countRows] = await Promise.all([
+      db
+        .select({
+          id: reports.id,
+          projectId: reports.projectId,
+          title: reports.title,
+          description: reports.description,
+          url: reports.url,
+          userAgent: reports.userAgent,
+          userId: reports.userId,
+          status: reports.status,
+          screenshotUrl: reports.screenshotUrl,
+          annotatedScreenshotUrl: reports.annotatedScreenshotUrl,
+          createdAt: reports.createdAt,
+          updatedAt: reports.updatedAt,
+        })
+        .from(reports)
+        .where(whereClause)
+        .orderBy(desc(reports.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(reports)
+        .where(whereClause),
+    ]);
+
+    const total = countRows[0]?.count ?? 0;
+
+    return NextResponse.json(
+      { reports: rows, total, page, limit, pages: Math.ceil(total / limit) },
+      { headers: corsHeaders }
+    );
+  } catch (err) {
+    console.error("[GET /api/reports]", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500, headers: corsHeaders });
   }
 }

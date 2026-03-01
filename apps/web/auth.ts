@@ -2,11 +2,20 @@ import NextAuth, { type NextAuthResult } from "next-auth";
 import GitHub from "next-auth/providers/github";
 import Google from "next-auth/providers/google";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
-import { db, users } from "@bugkit/db";
-import { eq } from "drizzle-orm";
+import { db, users, accounts, sessions, verificationTokens } from "@bugkit/db";
+
+// Type assertion needed for drizzle-orm@0.31 / @auth/drizzle-adapter@1.4.x compat
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const adapter = DrizzleAdapter(db, {
+  usersTable: users as any,
+  accountsTable: accounts as any,
+  sessionsTable: sessions as any,
+  verificationTokensTable: verificationTokens as any,
+});
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 const _nextAuth: NextAuthResult = NextAuth({
-  adapter: DrizzleAdapter(db),
+  adapter,
   providers: [
     GitHub({
       clientId: process.env.GITHUB_CLIENT_ID!,
@@ -33,26 +42,6 @@ const _nextAuth: NextAuthResult = NextAuth({
         session.user.id = token.id as string;
       }
       return session;
-    },
-    async signIn({ user, account }) {
-      if (!user.email) return false;
-
-      // Upsert user on first OAuth sign-in
-      const existingUser = await db
-        .select()
-        .from(users)
-        .where(eq(users.email, user.email))
-        .limit(1);
-
-      if (existingUser.length === 0) {
-        await db.insert(users).values({
-          email: user.email,
-          name: user.name ?? null,
-          image: user.image ?? null,
-        });
-      }
-
-      return true;
     },
   },
   pages: {

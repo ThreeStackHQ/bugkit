@@ -11,6 +11,10 @@ export {
   reportAttachments,
   integrations,
   subscriptions,
+  // Auth tables (DrizzleAdapter)
+  accounts,
+  sessions,
+  verificationTokens,
   // Enums
   reportStatusEnum,
   integrationTypeEnum,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   X,
   Filter,
@@ -32,73 +32,34 @@ interface Report {
   thumbnail: string;
 }
 
-// ─── Mock data ────────────────────────────────────────────────────────────────
+// ─── API types ────────────────────────────────────────────────────────────────
 
-const mockReports: Report[] = [
-  {
-    id: "1",
-    title: "Button click on checkout page throws 500",
-    url: "https://app.example.com/checkout",
-    reporter: "alice@example.com",
-    timestamp: "2026-03-01T14:22:00Z",
-    status: "open",
-    thumbnail: "https://placehold.co/80x50/1e293b/475569?text=🖥️",
-  },
-  {
-    id: "2",
-    title: "Dashboard charts not loading on Firefox",
-    url: "https://app.example.com/dashboard",
-    reporter: "bob@example.com",
-    timestamp: "2026-03-01T13:10:00Z",
-    status: "in_progress",
-    thumbnail: "https://placehold.co/80x50/1e293b/475569?text=📊",
-  },
-  {
-    id: "3",
-    title: "Settings page crashes on mobile",
-    url: "https://app.example.com/settings",
-    reporter: "carol@example.com",
-    timestamp: "2026-03-01T11:55:00Z",
-    status: "open",
-    thumbnail: "https://placehold.co/80x50/1e293b/475569?text=⚙️",
-  },
-  {
-    id: "4",
-    title: "Profile photo upload fails silently",
-    url: "https://app.example.com/profile",
-    reporter: "dave@example.com",
-    timestamp: "2026-02-29T17:30:00Z",
-    status: "resolved",
-    thumbnail: "https://placehold.co/80x50/1e293b/475569?text=👤",
-  },
-  {
-    id: "5",
-    title: "Search returns wrong results for special chars",
-    url: "https://app.example.com/search",
-    reporter: "eve@example.com",
-    timestamp: "2026-02-29T09:15:00Z",
-    status: "open",
-    thumbnail: "https://placehold.co/80x50/1e293b/475569?text=🔍",
-  },
-  {
-    id: "6",
-    title: "Email notifications not sent after signup",
-    url: "https://app.example.com/signup",
-    reporter: "frank@example.com",
-    timestamp: "2026-02-28T22:45:00Z",
-    status: "in_progress",
-    thumbnail: "https://placehold.co/80x50/1e293b/475569?text=📧",
-  },
-  {
-    id: "7",
-    title: "CSV export includes deleted rows",
-    url: "https://app.example.com/export",
-    reporter: "grace@example.com",
-    timestamp: "2026-02-28T14:00:00Z",
-    status: "resolved",
-    thumbnail: "https://placehold.co/80x50/1e293b/475569?text=📄",
-  },
-];
+interface ApiReport {
+  id: string;
+  title: string | null;
+  url: string | null;
+  userId: string | null;
+  status: Status;
+  screenshotUrl: string | null;
+  createdAt: string;
+}
+
+// ─── API fetch ────────────────────────────────────────────────────────────────
+
+async function fetchReports(): Promise<Report[]> {
+  const res = await fetch("/api/reports", { credentials: "include" });
+  if (!res.ok) return [];
+  const data = (await res.json()) as { reports: ApiReport[] };
+  return (data.reports ?? []).map((r: ApiReport) => ({
+    id: r.id,
+    title: r.title ?? "Untitled report",
+    url: r.url ?? "",
+    reporter: r.userId ?? "anonymous",
+    timestamp: r.createdAt,
+    status: r.status,
+    thumbnail: r.screenshotUrl ?? "",
+  }));
+}
 
 const mockConsoleLogs = [
   {
@@ -375,14 +336,23 @@ export default function ReportsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [activeReport, setActiveReport] = useState<Report | null>(null);
   const [dateRange, setDateRange] = useState("all");
+  const [allReports, setAllReports] = useState<Report[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchReports()
+      .then((data) => setAllReports(data))
+      .catch(() => setAllReports([]))
+      .finally(() => setLoading(false));
+  }, []);
 
   const counts = {
-    open: mockReports.filter((r) => r.status === "open").length,
-    in_progress: mockReports.filter((r) => r.status === "in_progress").length,
-    resolved: mockReports.filter((r) => r.status === "resolved").length,
+    open: allReports.filter((r) => r.status === "open").length,
+    in_progress: allReports.filter((r) => r.status === "in_progress").length,
+    resolved: allReports.filter((r) => r.status === "resolved").length,
   };
 
-  const filtered = mockReports.filter((r) => {
+  const filtered = allReports.filter((r) => {
     if (activeTab === "all") return true;
     return r.status === activeTab;
   });
@@ -411,7 +381,7 @@ export default function ReportsPage() {
   }
 
   const tabs: { key: FilterTab; label: string; count?: number }[] = [
-    { key: "all", label: "All", count: mockReports.length },
+    { key: "all", label: "All", count: allReports.length },
     { key: "open", label: "Open", count: counts.open },
     { key: "in_progress", label: "In Progress", count: counts.in_progress },
     { key: "resolved", label: "Resolved", count: counts.resolved },
@@ -607,7 +577,12 @@ export default function ReportsPage() {
           </tbody>
         </table>
 
-        {filtered.length === 0 && (
+        {loading && (
+          <div className="py-16 text-center">
+            <p className="text-zinc-500 text-sm animate-pulse">Loading reports…</p>
+          </div>
+        )}
+        {!loading && filtered.length === 0 && (
           <div className="py-16 text-center">
             <Bug className="w-10 h-10 text-zinc-700 mx-auto mb-3" />
             <p className="text-zinc-500 text-sm">No reports in this category</p>
