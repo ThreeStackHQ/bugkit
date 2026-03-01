@@ -1,5 +1,8 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
+import { Sidebar } from "@/components/sidebar";
+
+export const dynamic = "force-dynamic";
 
 export default async function DashboardLayout({
   children,
@@ -7,63 +10,51 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const session = await auth();
-  if (!session) {
+  if (!session?.user) {
     redirect("/login");
   }
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-white">
-      {/* Sidebar placeholder */}
-      <div className="flex h-screen">
-        <aside className="w-64 border-r border-zinc-800 bg-zinc-950 flex flex-col p-4">
-          <div className="flex items-center gap-2 mb-8 px-2">
-            <div className="w-8 h-8 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-center">
-              <svg
-                className="w-4 h-4 text-red-500"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                />
-              </svg>
-            </div>
-            <span className="font-semibold text-white">BugKit</span>
-          </div>
-          <nav className="flex flex-col gap-1">
-            <a
-              href="/dashboard"
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-            >
-              Dashboard
-            </a>
-            <a
-              href="/dashboard/reports"
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-            >
-              Reports
-            </a>
-            <a
-              href="/dashboard/projects"
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-            >
-              Projects
-            </a>
-            <a
-              href="/dashboard/settings"
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-            >
-              Settings
-            </a>
-          </nav>
-        </aside>
+    <div className="min-h-screen bg-zinc-950 text-white">
+      {/* Desktop sidebar (fixed) */}
+      <Sidebar
+        user={{
+          name: session.user.name,
+          email: session.user.email,
+          image: session.user.image,
+        }}
+      />
 
-        {/* Main content */}
-        <main className="flex-1 overflow-auto">{children}</main>
+      {/* Main content — offset by sidebar on lg+ */}
+      <div className="lg:pl-60 flex flex-col min-h-screen">
+        {/* Top header */}
+        <header className="hidden lg:flex h-14 items-center justify-between px-8 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur sticky top-0 z-20">
+          <div className="flex items-center gap-2 text-sm text-zinc-400">
+            <span>BugKit</span>
+            <span>/</span>
+            <span className="text-white font-medium">Dashboard</span>
+          </div>
+          <div className="flex items-center gap-3">
+            {session.user.image ? (
+              <img
+                src={session.user.image}
+                alt="Avatar"
+                className="w-8 h-8 rounded-full ring-2 ring-zinc-700"
+              />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-rose-500/20 border border-rose-500/30 flex items-center justify-center">
+                <span className="text-xs font-bold text-rose-400">
+                  {(session.user.name ?? session.user.email ?? "?")[0].toUpperCase()}
+                </span>
+              </div>
+            )}
+          </div>
+        </header>
+
+        {/* Page content with mobile top-padding for sticky header */}
+        <main className="flex-1 pt-14 lg:pt-0">
+          {children}
+        </main>
       </div>
     </div>
   );

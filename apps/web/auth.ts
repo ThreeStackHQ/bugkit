@@ -1,11 +1,11 @@
-import NextAuth from "next-auth";
+import NextAuth, { type NextAuthResult } from "next-auth";
 import GitHub from "next-auth/providers/github";
 import Google from "next-auth/providers/google";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { db, users } from "@bugkit/db";
 import { eq } from "drizzle-orm";
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+const _nextAuth: NextAuthResult = NextAuth({
   adapter: DrizzleAdapter(db),
   providers: [
     GitHub({
@@ -59,3 +59,5 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     signIn: "/login",
   },
 });
+
+export const { handlers, auth, signIn, signOut } = _nextAuth;
