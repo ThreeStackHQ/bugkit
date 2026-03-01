@@ -1,0 +1,14 @@
+{
+  "name": "@bugkit/widget",
+  "version": "0.0.1",
+  "private": true,
+  "description": "BugKit reporter widget — embed in any SaaS app",
+  "main": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@bugkit/config": "workspace:*",
+    "typescript": "^5.4.5"
+  }
+}
